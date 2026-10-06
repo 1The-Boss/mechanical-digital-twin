@@ -18,10 +18,10 @@ ENV/
 # Jupyter Notebook
 .ipynb_checkpoints/
 
-# Model files
-models_saved/*.pt
-models_saved/*.pkl
-models_saved/*.json
+# Model files (tracked via Git LFS)
+# models_saved/*.pt
+# models_saved/*.pkl
+# models_saved/*.json
 
 # Data files
 data/raw/**/*
