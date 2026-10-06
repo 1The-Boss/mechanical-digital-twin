@@ -8,6 +8,9 @@ import joblib
 import torch
 from pathlib import Path
 import sys
+import os
+import requests
+from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -17,6 +20,71 @@ from physics.dynamics import inverse_dynamics
 from physics.faults import FaultConfig, DEFAULT_FAULT_CONFIGS, FAULT_CLASSES
 from simulation import FourBarSimulator, SensorSuite, DEFAULT_SENSOR_CONFIGS
 from inference import create_predictors, create_diagnosis_pipeline
+
+
+HF_REPO = os.environ.get("HF_MODEL_REPO", "1The-Boss/mechanical-digital-twin-models")
+MODEL_FILES = [
+    "residual_model.pt",
+    "residual_input_scaler.pkl",
+    "residual_output_scaler.pkl",
+    "autoencoder.pt",
+    "autoencoder_scaler.pkl",
+    "anomaly_threshold.json",
+    "fault_classifier.pkl",
+    "classifier_scaler.pkl",
+    "training_summary.json",
+]
+
+
+def download_models_from_hf(target_dir: str = "models_saved") -> bool:
+    """Download model files from Hugging Face Hub if not present locally."""
+    target = Path(target_dir)
+    target.mkdir(parents=True, exist_ok=True)
+    
+    missing = [f for f in MODEL_FILES if not (target / f).exists()]
+    if not missing:
+        return True
+    
+    st.info(f"Downloading {len(missing)} model files from Hugging Face Hub...")
+    progress = st.progress(0)
+    
+    base_url = f"https://huggingface.co/{HF_REPO}/resolve/main"
+    success = True
+    
+    for i, fname in enumerate(missing):
+        url = f"{base_url}/{fname}"
+        try:
+            resp = requests.get(url, stream=True, timeout=60)
+            if resp.status_code == 200:
+                total = int(resp.headers.get("content-length", 0))
+                with open(target / fname, "wb") as f, tqdm(
+                    total=total, unit="B", unit_scale=True, leave=False, desc=fname
+                ) as pbar:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                        pbar.update(len(chunk))
+            else:
+                st.error(f"Failed to download {fname}: HTTP {resp.status_code}")
+                success = False
+        except Exception as e:
+            st.error(f"Error downloading {fname}: {e}")
+            success = False
+        progress.progress((i + 1) / len(missing))
+    
+    progress.empty()
+    return success
+
+
+@st.cache_resource
+def ensure_models(device="cpu"):
+    """Ensure models exist locally, downloading from HF if needed."""
+    models_dir = Path("models_saved")
+    if not all((models_dir / f).exists() for f in MODEL_FILES):
+        with st.spinner("Models not found locally. Downloading from Hugging Face Hub..."):
+            if not download_models_from_hf("models_saved"):
+                st.error("Failed to download models. Check HF_MODEL_REPO env var or internet connection.")
+                return None, None, False
+    return load_models(device)
 
 
 st.set_page_config(
@@ -50,6 +118,18 @@ def load_models(device='cpu'):
         diagnosis = None
         models_loaded = False
     return predictors, diagnosis, models_loaded
+
+
+@st.cache_resource
+def ensure_models(device="cpu"):
+    """Ensure models exist locally, downloading from HF if needed."""
+    models_dir = Path("models_saved")
+    if not all((models_dir / f).exists() for f in MODEL_FILES):
+        with st.spinner("Models not found locally. Downloading from Hugging Face Hub..."):
+            if not download_models_from_hf("models_saved"):
+                st.error("Failed to download models. Check HF_MODEL_REPO env var or internet connection.")
+                return None, None, False
+    return load_models(device)
 
 
 def run_simulation(params, fault_config, duration, timestep, omega2, initial_theta2):
@@ -176,7 +256,7 @@ def main():
 
     config = load_config()
     params = load_mechanism_params()
-    predictors, diagnosis, models_loaded = load_models()
+    predictors, diagnosis, models_loaded = ensure_models()
 
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🔧 Mechanism Config", "▶️ Simulation", "📐 Visualization",
@@ -491,6 +571,13 @@ def main():
             st.success("✅ Models Loaded")
         else:
             st.error("❌ Models Not Loaded")
+            if st.button("📥 Download Models from HF Hub"):
+                with st.spinner("Downloading models..."):
+                    if download_models_from_hf("models_saved"):
+                        st.success("Models downloaded! Reloading...")
+                        st.rerun()
+                    else:
+                        st.error("Download failed. Check HF_MODEL_REPO env var.")
 
         st.divider()
         st.subheader("Quick Actions")
