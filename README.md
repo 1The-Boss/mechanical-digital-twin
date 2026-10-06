@@ -1,0 +1,366 @@
+# Physics-Informed Hybrid Digital Twin for Four-Bar Linkage
+
+## 📋 Project Overview
+
+This project implements a complete digital twin system for a planar four-bar linkage mechanism. It combines:
+
+- **Physics-based modeling**: Lagrangian dynamics, kinematics, friction
+- **Virtual sensors**: Encoder, tachometer, accelerometer, torque sensor with realistic noise
+- **Hybrid modeling**: Physics prediction + ML residual correction
+- **Unsupervised anomaly detection**: Autoencoder trained on healthy data
+- **Fault diagnosis**: Supervised classifier for fault type identification
+- **Interactive dashboard**: Streamlit-based visualization and monitoring
+
+## 🎯 Objectives
+
+1. Simulate a four-bar linkage with realistic physics
+2. Generate synthetic sensor data for healthy and faulty conditions
+3. Train a neural network to learn physics residuals
+4. Build a hybrid physics+ML predictor
+5. Train an autoencoder for unsupervised anomaly detection
+6. Train a fault classifier for diagnosis
+7. Deploy as an interactive Streamlit dashboard
+
+## 🔧 Mechanical System
+
+### Four-Bar Linkage Parameters
+
+| Parameter | Symbol | Default Value | Unit |
+|-----------|--------|---------------|------|
+| Ground link | L₁ | 0.20 | m |
+| Input crank | L₂ | 0.08 | m |
+| Coupler | L₃ | 0.18 | m |
+| Output rocker | L₄ | 0.15 | m |
+| Crank mass | m₂ | 0.5 | kg |
+| Coupler mass | m₃ | 1.0 | kg |
+| Rocker mass | m₄ | 0.7 | kg |
+| Crank inertia | I₂ | 0.0005 | kg·m² |
+| Coupler inertia | I₃ | 0.003 | kg·m² |
+| Rocker inertia | I₄ | 0.0015 | kg·m² |
+
+### Generalized Coordinates
+
+- θ₂: Input crank angle (actuated)
+- θ₃: Coupler angle
+- θ₄: Rocker angle
+
+All calculations use **SI units** and **radians** internally.
+
+## 📐 Kinematics
+
+### Vector Loop Equation
+
+```
+r₂ + r₃ = r₁ + r₄
+```
+
+Scalar form:
+```
+L₂·cos(θ₂) + L₃·cos(θ₃) = L₁ + L₄·cos(θ₄)
+L₂·sin(θ₂) + L₃·sin(θ₃) = L₄·sin(θ₄)
+```
+
+### Position Analysis
+Solved using Freudenstein's equation:
+```
+K₁ = L₁/L₂, K₂ = L₁/L₃, K₃ = (L₂² + L₃² - L₄² - L₁²)/(2L₂L₃)
+A·cos(θ₃) + B·sin(θ₃) + C = 0
+```
+
+### Velocity Analysis
+```
+J·[ω₃, ω₄]ᵀ = L₂·ω₂·[sin(θ₂), -cos(θ₂)]ᵀ
+```
+
+### Acceleration Analysis
+```
+J·[α₃, α₄]ᵀ = [L₂·(cos(θ₂)ω₂² - sin(θ₂)α₂) + L₃·cos(θ₃)ω₃² - L₄·cos(θ₄)ω₄²,
+               L₂·(sin(θ₂)ω₂² + cos(θ₂)α₂) + L₃·sin(θ₃)ω₃² - L₄·sin(θ₄)ω₄²]ᵀ
+```
+
+## ⚙️ Dynamics
+
+### Lagrangian Formulation
+
+```
+L = T - V
+d/dt(∂L/∂q̇) - ∂L/∂q = Q
+```
+
+Where:
+- T = Kinetic energy (translational + rotational)
+- V = Potential energy (gravitational)
+- Q = Generalized forces (input torque + friction)
+
+### Mass Matrix
+```
+M(q) = [I₂ + m₂·J₂ᵀJ₂ + m₃·J₂ᵀJ₃   m₃·J₂ᵀJ₃         0        ]
+       [m₃·J₃ᵀJ₂         I₃ + m₃·J₃ᵀJ₃         0        ]
+       [0                0                 I₄ + m₄·J₄ᵀJ₄]
+```
+
+### Equations of Motion
+```
+M(q)α + C(q, q̇) + G(q) = τ - τ_friction
+```
+
+## 🔩 Friction Model
+
+### Coulomb + Viscous Friction
+```
+τ_f = c·sign(ω) + b·ω
+```
+
+Where:
+- c: Coulomb friction coefficient
+- b: Viscous friction coefficient
+
+## 🏷️ Fault Models
+
+| Fault ID | Type | Description | Parameter Change |
+|----------|------|-------------|------------------|
+| 0 | NORMAL | Healthy operation | None |
+| 1 | FRICTION_FAULT | Increased joint friction | c, b × severity |
+| 2 | MASS_FAULT | Added mass to coupler | m₃, I₃ × severity |
+| 3 | JOINT_FAULT | Local joint degradation | c, b × severity at joint |
+| 4 | INERTIA_FAULT | Increased inertia | I₃ × severity |
+
+## 📊 Virtual Sensors
+
+| Sensor | Measurement | Noise Model |
+|--------|-------------|-------------|
+| Encoder | θ₂ | Gaussian (σ = 0.1% of range) |
+| Tachometer | ω₂ | Gaussian (σ = 1% of range) |
+| Accelerometer | α₂ | Gaussian (σ = 2% of range) |
+| Torque Sensor | τ | Gaussian (σ = 1% of range) |
+
+## 🏗️ Architecture
+
+```
+Mechanical Parameters
+         ↓
+Physics-Based Four-Bar Model
+         ↓
+Kinematics + Dynamics
+         ↓
+Virtual Sensors
+         ↓
+Synthetic Sensor Data
+         ↓
+Physics Prediction
+         ↓
+Residual Calculation
+         ↓
+ML Residual Model (MLP)
+         ↓
+Hybrid Prediction = Physics + ML_Residual
+         ↓
+Residual Features (Statistical)
+         ↓
+Autoencoder (64→32→8→32→64)
+         ↓
+Anomaly Score (Reconstruction Error)
+         ↓
+Threshold (95th percentile healthy)
+         ↓
+Fault Classifier (Random Forest)
+         ↓
+Diagnosis Result
+```
+
+## 📁 Project Structure
+
+```
+mechanical_digital_twin/
+├── app.py                    # Streamlit dashboard
+├── config.yaml               # Configuration
+├── requirements.txt          # Dependencies
+├── README.md                 # This file
+├── physics/                  # Mechanical models
+│   ├── mechanism.py          # Parameters
+│   ├── kinematics.py         # Position/velocity/acceleration
+│   ├── dynamics.py           # Lagrangian dynamics
+│   ├── friction.py           # Friction models
+│   └── faults.py             # Fault injection
+├── simulation/               # Simulation & sensors
+│   ├── simulator.py          # Time integration
+│   ├── sensor_model.py       # Virtual sensors
+│   └── data_generator.py     # Dataset generation
+├── preprocessing/            # Data preprocessing
+│   ├── cleaner.py            # Data cleaning
+│   ├── scaler.py             # Feature scaling
+│   └── windowing.py          # Time windowing
+├── models/                   # ML models
+│   ├── residual_model.py     # Residual MLP
+│   ├── hybrid_model.py       # Hybrid predictor
+│   └── autoencoder.py        # Autoencoder
+├── training/                 # Training scripts
+│   ├── train_residual.py     # Residual model
+│   ├── train_autoencoder.py  # Anomaly detector
+│   ├── train_classifier.py   # Fault classifier
+│   └── train_all.py          # Full pipeline
+├── inference/                # Inference pipeline
+│   ├── predictor.py          # Physics/hybrid prediction
+│   ├── anomaly_detector.py   # Anomaly detection
+│   └── fault_diagnosis.py    # Fault classification
+├── evaluation/               # Evaluation
+│   └── evaluate.py           # Metrics & comparison
+├── visualization/            # Plotting
+│   ├── mechanism_animation.py # Mechanism plots
+│   └── plots.py              # Data plots
+├── tests/                    # Unit tests
+│   ├── test_kinematics.py
+│   ├── test_dynamics.py
+│   ├── test_simulation.py
+│   └── test_models.py
+├── models_saved/             # Trained models
+└── data/                     # Datasets
+```
+
+## 🚀 Quick Start
+
+### Installation
+
+```bash
+cd mechanical_digital_twin
+pip install -r requirements.txt
+```
+
+### Generate Data
+
+```bash
+python -c "
+from simulation import create_default_generator
+gen = create_default_generator()
+healthy, faulty = gen.generate_dataset()
+gen.save_consolidated(healthy + faulty, 'data/processed/dataset.parquet')
+print('Dataset generated!')
+"
+```
+
+### Train All Models
+
+```bash
+python -m training.train_all
+```
+
+This trains:
+1. Residual MLP (~2 min)
+2. Autoencoder (~1 min)
+3. Fault Classifier (~30 sec)
+
+### Run Dashboard
+
+```bash
+streamlit run app.py
+```
+
+Open http://localhost:8501 in your browser.
+
+## 📈 Expected Results
+
+### Model Performance (Typical)
+
+| Model | Metric | Value |
+|-------|--------|-------|
+| Physics Only | Torque RMSE | ~0.15 Nm |
+| Residual MLP | Torque RMSE | ~0.05 Nm |
+| Hybrid | Torque RMSE | ~0.03 Nm |
+| Autoencoder | Healthy Recon. Error | ~0.001 |
+| Classifier | Accuracy | >95% |
+
+### Fault Detection
+
+| Fault Type | Detection Rate |
+|------------|----------------|
+| Friction | >98% |
+| Mass Change | >95% |
+| Joint Degradation | >97% |
+| Inertia Change | >93% |
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run specific test
+pytest tests/test_kinematics.py -v
+```
+
+## 📖 Key Equations Reference
+
+### Kinetic Energy
+```
+T = ½I₂ω₂² + ½I₃ω₃² + ½I₄ω₄² + ½m₂v_G₂² + ½m₃v_G₃² + ½m₄v_G₄²
+```
+
+### Potential Energy
+```
+V = m₂g·y_G₂ + m₃g·y_G₃ + m₄g·y_G₄
+```
+
+### Hybrid Prediction
+```
+ŷ_hybrid = ŷ_physics + f_ML(x)
+```
+
+### Anomaly Score
+```
+s(x) = ||x - AE(x)||²
+```
+
+### Threshold
+```
+θ = percentile({s(x_healthy)}, 95)
+```
+
+## 🔬 Robustness Experiments
+
+The system is evaluated under:
+- Sensor noise levels: 0%, 1%, 5%, 10%
+- Fault severities: 1.5×, 2×, 3× (train), 2.5×, 4× (test)
+- Different operating speeds: 5-15 rad/s
+
+## 🎓 Educational Value
+
+This project demonstrates:
+- Rigorous multibody dynamics
+- Numerical methods for ODEs
+- Physics-informed machine learning
+- Hybrid modeling paradigm
+- Unsupervised anomaly detection
+- Digital twin concepts
+- Reproducible ML pipelines
+
+## 📝 Limitations
+
+- Planar mechanism only (no 3D effects)
+- Rigid body assumption
+- Simplified friction model
+- Synthetic data only (no real hardware)
+- Single operating condition training
+- No model uncertainty quantification
+
+## 🔮 Future Improvements
+
+- [ ] 3D spatial mechanism
+- [ ] Flexible body dynamics
+- [ ] PINN with physics-informed loss
+- [ ] Bayesian uncertainty estimation
+- [ ] Real-time deployment (ONNX/TensorRT)
+- [ ] Hardware-in-the-loop validation
+- [ ] Multiple fault simultaneous diagnosis
+- [ ] Remaining useful life prediction
+
+## 📄 License
+
+MIT License - Educational use encouraged.
+
+## 🤝 Contributing
+
+This is an educational project. Issues and improvements welcome!
+
+---
+
+**Built with**: Python, NumPy, SciPy, PyTorch, scikit-learn, Streamlit, Plotly

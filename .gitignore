@@ -1,0 +1,52 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Model files
+models_saved/*.pt
+models_saved/*.pkl
+models_saved/*.json
+
+# Data files
+data/raw/**/*
+data/processed/**/*
+*.csv
+*.parquet
+*.npz
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/
+
+# Test outputs
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Plot outputs
+plots/
+*.png
+*.html
